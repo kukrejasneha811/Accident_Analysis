@@ -1,0 +1,188 @@
+#Import modules
+import numpy as np
+import holidays
+import pandas as pd
+import seaborn as sns
+import pickle
+import time
+import timeit
+
+
+import matplotlib.pyplot as plt
+plt.style.use('dark_background')
+%matplotlib inline
+
+import datetime
+import math
+from collections import Counter
+
+#scipy
+import scipy.stats as stats
+from scipy import stats
+from scipy.stats import chi2_contingency
+
+#sklearn
+import sklearn
+from sklearn import ensemble
+from sklearn import preprocessing
+from sklearn.decomposition import PCA
+from sklearn.ensemble import AdaBoostClassifier, BaggingClassifier, ExtraTreesClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_selection import SelectFromModel
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score 
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.model_selection import cross_val_score, GridSearchCV, train_test_split
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler, OrdinalEncoder
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.utils import resample
+
+#for clustering
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import normalize
+from sklearn.decomposition import PCA
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.metrics import silhouette_score
+
+#other learners
+from xgboost import XGBClassifier
+import lightgbm as lgb
+from kmodes.kmodes import KModes
+
+#imblearn
+from imblearn.ensemble import BalancedBaggingClassifier
+from imblearn.ensemble import EasyEnsembleClassifier
+from imblearn.ensemble import BalancedRandomForestClassifier
+
+#webscraping
+import requests
+from bs4 import BeautifulSoup
+import re
+import urllib
+from IPython.core.display import HTML
+
+#time series
+import statsmodels.api as sm
+from pylab import rcParams
+import itertools
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.arima_model import ARIMA
+
+
+#warning ignorer
+import warnings
+warnings.filterwarnings("ignore")
+
+
+# # #DATAFRAME PICKLE CREATED IN CELLS BELOW INSTEAD OF RUNNING THROUGH ENTIRE PROCESS AFTER RESTARTING
+# # #import pickled file
+df = pd.read_pickle("df.pkl")
+# df.to_csv('uktraffic_acc.csv')
+
+
+accidentsperyear = df.groupby(['year'])['accident_index'].count()
+
+# prepare plot
+plt.style.use('dark_background')
+plt.figure(figsize=(10,5))
+colors = sns.color_palette("plasma", n_colors=7)
+sns.barplot(accidentsperyear.index,accidentsperyear.values, palette=colors)
+sns.despine(top=True, right=True, left=True, bottom=True)
+plt.title("Accidents Per Year",fontsize=20,fontweight="bold")
+plt.xlabel("\nYear", fontsize=15, fontweight="bold")
+plt.ylabel("\nNumber of Accidents", fontsize=15, fontweight="bold")
+plt.savefig('accidentsperyear.png')
+plt.tight_layout()
+
+
+accidentspermonth = df.groupby(['month'])['accident_index'].count()
+
+# prepare plot
+plt.style.use('dark_background')
+plt.figure(figsize=(20,10))
+colors = sns.color_palette("plasma_r", n_colors=12)
+mt=sns.barplot(accidentspermonth.index,accidentspermonth.values, palette=colors)
+sns.despine(top=True, right=True, left=True, bottom=True)
+#ax is the axes instance
+group_labels = ['Jan', 'Feb','Mar','Apr','May','June','July','Aug','Sept','Oct','Nov','Dec' ]
+
+mt.set_xticklabels(group_labels)
+plt.title("Accidents Per Month",fontsize=20,fontweight="bold")
+plt.xticks(fontsize=18)
+plt.yticks(fontsize=12)
+plt.xlabel("\nMonth", fontsize=15, fontweight="bold")
+plt.ylabel("\nNumber of Accidents", fontsize=15, fontweight="bold")
+plt.savefig('accidentspermonth.png')
+plt.tight_layout()
+
+weekdays = ['Monday', 'Tuesday','Wednesday','Thursday', 'Friday', 'Saturday', 'Sunday']
+accweekday = df.groupby(['year', 'day_of_week']).size()
+accweekday = accweekday.rename_axis(['year', 'day_of_week'])\
+                               .unstack('day_of_week')\
+                               .reindex(columns=weekdays)
+plt.figure(figsize=(15,10))
+plt.style.use('dark_background')
+sns.heatmap(accweekday, cmap='plasma_r')
+plt.title('\nAccidents by Weekday per Year\n', fontsize=14, fontweight='bold')
+plt.xticks(fontsize=15)
+plt.yticks(fontsize=12)
+plt.xlabel('')
+plt.ylabel('')
+plt.savefig('accidentsbyweekdayperyear.png')
+plt.show()
+
+
+accidentsperseason = df.groupby(['season'])['accident_index'].count()
+seaord=['spring', 'summer', 'fall','winter']
+# prepare plot
+plt.style.use('dark_background')
+plt.figure(figsize=(15,10))
+
+sns.barplot(accidentsperseason.index,accidentsperseason.values, order=seaord, 
+            saturation=1, palette='magma_r')
+sns.despine(top=True, right=True, left=True, bottom=True)
+plt.title("Accidents Per Season",fontsize=20,fontweight="bold")
+plt.xticks(fontsize=15)
+plt.yticks(fontsize=12)
+plt.xlabel("\nSeason", fontsize=15, fontweight="bold")
+plt.ylabel("\nNumber of Accidents", fontsize=15, fontweight="bold")
+plt.tight_layout()
+plt.savefig('accidentsperseason.png')
+
+
+#"Morning Rush (6-10)", "Day (10-12)", "Lunch Rush (12-14)","Afternoon (14-16)",
+#"After Work Rush (16-18)", "Evening (18-22)", "Night (22-6)"
+
+timeofdaygroups = {'1': "Morning Rush",
+                   '2': "Day",
+                   '3': "Lunch Rush",
+                   '4': "Afternoon",
+                   '5': "After Work Rush",
+                   '6': "Evening",
+                   '7': "Night"}
+df['time_of_day']=df['time_of_day'].map(timeofdaygroups)
+
+
+accidentspertod = df.groupby(['time_of_day'])['accident_index'].count()
+
+# prepare plot
+plt.style.use('dark_background')
+plt.figure(figsize=(15,10))
+tod=["Morning Rush", "Day", "Lunch Rush", "Afternoon",
+     "After Work Rush", "Evening", "Night"]
+sns.barplot(accidentspertod.index,accidentspertod.values, order=tod, palette='rainbow')
+sns.despine(top=True, right=True, left=True, bottom=True)
+plt.title("Accidents Per Time of Day",fontsize=20,fontweight="bold")
+plt.xticks(fontsize=15)
+plt.yticks(fontsize=12)
+
+plt.xlabel("", fontsize=15, fontweight="bold")
+plt.ylabel("\nNumber of Accidents", fontsize=15, fontweight="bold")
+plt.tight_layout()
+plt.savefig('accidentspertod.png')
+
+

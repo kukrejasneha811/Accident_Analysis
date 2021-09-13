@@ -1,0 +1,540 @@
+#Import modules
+import numpy as np
+import holidays
+import pandas as pd
+import seaborn as sns
+import pickle
+import time
+import timeit
+
+
+import matplotlib.pyplot as plt
+plt.style.use('dark_background')
+%matplotlib inline
+
+import datetime
+import math
+from collections import Counter
+
+#scipy
+import scipy.stats as stats
+from scipy import stats
+from scipy.stats import chi2_contingency
+
+#sklearn
+import sklearn
+from sklearn import ensemble
+from sklearn import preprocessing
+from sklearn.decomposition import PCA
+from sklearn.ensemble import AdaBoostClassifier, BaggingClassifier, ExtraTreesClassifier
+from sklearn.ensemble import RandomForestClassifier
+from sklearn.feature_selection import SelectFromModel
+from sklearn.impute import SimpleImputer
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import accuracy_score, f1_score, precision_score, recall_score 
+from sklearn.metrics import classification_report, confusion_matrix, roc_auc_score
+from sklearn.model_selection import cross_val_score, GridSearchCV, train_test_split
+from sklearn.preprocessing import LabelEncoder, OneHotEncoder, StandardScaler, OrdinalEncoder
+from sklearn.svm import SVC
+from sklearn.tree import DecisionTreeClassifier
+from sklearn.utils import resample
+
+#for clustering
+from sklearn.cluster import KMeans
+from sklearn.preprocessing import normalize
+from sklearn.decomposition import PCA
+from sklearn.cluster import MiniBatchKMeans
+from sklearn.metrics import silhouette_score
+
+#other learners
+from xgboost import XGBClassifier
+import lightgbm as lgb
+from kmodes.kmodes import KModes
+
+#imblearn
+from imblearn.ensemble import BalancedBaggingClassifier
+from imblearn.ensemble import EasyEnsembleClassifier
+from imblearn.ensemble import BalancedRandomForestClassifier
+
+#webscraping
+import requests
+from bs4 import BeautifulSoup
+import re
+import urllib
+from IPython.core.display import HTML
+
+#time series
+import statsmodels.api as sm
+from pylab import rcParams
+import itertools
+from statsmodels.tsa.stattools import adfuller
+from statsmodels.tsa.stattools import acf, pacf
+from statsmodels.tsa.seasonal import seasonal_decompose
+from statsmodels.tsa.arima_model import ARIMA
+
+
+#warning ignorer
+import warnings
+warnings.filterwarnings("ignore")
+
+#import files
+
+ac = pd.read_csv(r'Accident_Information.csv', low_memory=False, chunksize=30000)
+vc = pd.read_csv(r'Vehicle_Information.csv', low_memory=False, chunksize=30000)
+
+
+#chunk cleaning and dataframing for accident column
+acchunk = []
+for chunk in ac:
+    acchunk_filter = chunk[
+        (chunk.Year.astype(int) >= 2010) &
+        (chunk.Year.astype(int) <= 2017) &
+        (chunk['Road_Type'] != "Unknown") &
+        (chunk['Junction_Control'] != "Data missing or out of range") &
+        (chunk['Carriageway_Hazards'] != "Data missing or out of range") &
+        (chunk['Junction_Detail'] != "Data missing or out of range") &
+        (chunk['Road_Surface_Conditions'] != "Data missing or out of range") &
+        (chunk['Special_Conditions_at_Site'] != "Data missing or out of range") &
+        (chunk['Weather_Conditions'] != "Data missing or out of range") &
+        (chunk['Latitude'].notnull()) &
+        (chunk['Longitude'].notnull())
+    ]
+    acchunk.append(acchunk_filter)
+df1 = pd.concat(acchunk)
+
+
+#chunk cleaning for vehicles column
+vcchunk = []
+for chunk2 in vc:
+    vcchunk_filter = chunk2[
+        (chunk2.Year.astype(int) >= 2010)&
+        (chunk2.Year.astype(int) <= 2017) &
+        (chunk2['Driver_Home_Area_Type'] != "Data missing or out of range") &
+        (chunk2['Journey_Purpose_of_Driver'] != "Data missing or out of range") &
+        (chunk2['Junction_Location'] != "Data missing or out of range") &
+        (chunk2['Was_Vehicle_Left_Hand_Drive'] != "Data missing or out of range") &
+        (chunk2['Hit_Object_in_Carriageway'] != "Data missing or out of range") &
+        (chunk2['Skidding_and_Overturning'] != "Data missing or out of range") &
+        (chunk2['Towing_and_Articulation'] != "Data missing or out of range") &
+        (chunk2['Vehicle_Leaving_Carriageway'] != "Data missing or out of range") &
+        (chunk2['Vehicle_Manoeuvre'] != "Data missing or out of range") &
+        (chunk2['Vehicle_Type'] != "Data missing or out of range") &
+        (chunk2['X1st_Point_of_Impact'] != "Data missing or out of range") &
+        (chunk2['Sex_of_Driver'] != "Data missing or out of range") &
+        (chunk2['Age_Band_of_Driver'] != "Data missing or out of range")
+        
+    ]
+    vcchunk.append(vcchunk_filter)
+df2 = pd.concat(vcchunk)
+
+
+
+#merge dataframes
+df = pd.merge(df1,df2)
+
+
+df.describe(include ='all')
+
+
+#drop Location_Easting_OSGR & Location_Northing_OSGR
+#because they are the similar to Latitude and Longitude 
+
+df = df.drop(['Location_Easting_OSGR', 'Location_Northing_OSGR'], axis=1)
+
+df.shape()
+
+#standardize all column names to lowercase, and remove some characters 
+#for ease of use in querying
+df.columns = map(str.lower, df.columns)
+df.columns = df.columns.str.replace('.','')
+df.columns = df.columns.str.replace('(','')
+df.columns = df.columns.str.replace(')','')
+
+#convert date/time to datetime datatype
+
+df['date'] = pd.to_datetime((df['date']), format= "%Y-%m-%d")
+
+#mistyped datatypes
+
+df[['did_police_officer_attend_scene_of_accident',
+    'driver_imd_decile','vehicle_reference',
+    'vehicle_locationrestricted_lane','1st_road_number',
+    '2nd_road_number','driver_imd_decile',
+    'pedestrian_crossing-physical_facilities',
+   'pedestrian_crossing-human_control']]= df[['did_police_officer_attend_scene_of_accident',
+    'driver_imd_decile','vehicle_reference',
+    'vehicle_locationrestricted_lane','1st_road_number',
+    '2nd_road_number','driver_imd_decile',
+    'pedestrian_crossing-physical_facilities',
+   'pedestrian_crossing-human_control']].astype('object')
+
+df.columns.to_series().groupby(df.dtypes).groups
+
+df.isnull().sum().sort_values(ascending=False)/df.shape[0]*100
+
+# #2nd_road_class
+df['2nd_road_class'].value_counts()/df.shape[0]*100
+
+df = df.drop(['2nd_road_class'], axis=1)
+
+
+#driver_imd_decile
+df['driver_imd_decile'].value_counts()/df.shape[0]*100
+
+
+df['driver_imd_decile'].fillna(method='ffill', inplace=True)
+
+
+df['age_of_vehicle'].describe()
+
+df['age_of_vehicle'].median()
+
+
+#fillna by 7 
+df['age_of_vehicle'].fillna(7, inplace=True)
+
+#group age_of_vehicle
+#1=0-3, 2=3-5, 3=5-8, 4=8-11, 5=
+def fixedvehicleage(age):
+    if age>=0 and age<=120:
+        return age
+    else:
+        return np.nan
+
+df['age_of_vehicle'] = df['age_of_vehicle'].apply(fixedvehicleage)
+
+
+df['age_of_vehicle'] = pd.cut(df['age_of_vehicle'], 
+                             [0,2,5,8,11,14,17,120], labels=['1', '2', '3','4','5','6','7'])
+
+
+#model
+df['model'].value_counts()/df.shape[0]*100
+
+df['model'].describe()
+
+df['model'].fillna(method='ffill', inplace=True)
+
+#engine_capacity_cc
+df['engine_capacity_cc'].describe()
+
+#first I'm going to handle both ends of outliers.
+#(determine the min and max cuttoffs for detecting the outlier)
+q75, q25 = np.percentile(df['engine_capacity_cc'].dropna(), [75 ,25])
+iqr = q75 - q25
+ 
+ecmin = q25 - (iqr*1.5)
+ecmax = q75 + (iqr*1.5)
+
+df = df[df['engine_capacity_cc']<=ecmax]
+
+
+df = df[df['engine_capacity_cc']>=ecmin]
+
+df['engine_capacity_cc'].hist(bins=20)
+plt.style.use('dark_background')
+
+#check values of 'engine_capacity_cc'
+df['engine_capacity_cc'].describe()
+
+df['engine_capacity_cc'].mean()
+
+df['engine_capacity_cc'].fillna(1652, inplace=True)
+
+
+df.isnull().sum().sort_values(ascending=False)/df.shape[0]*100
+
+
+# #lsoa_of_accident_location
+df['lsoa_of_accident_location'].value_counts()
+
+
+df['lsoa_of_accident_location'].describe()
+
+
+df['lsoa_of_accident_location'].fillna(method='ffill', inplace=True)
+
+
+#### Check nulls for again
+df.isnull().sum().sort_values(ascending=False)/df.shape[0]*100
+
+
+#drop the remaining nulls that are <1%
+df.dropna(inplace=True)
+
+#last check
+df.isnull().sum().sort_values(ascending=False)/df.shape[0]*100
+
+#detecting outliers of numerical columns (all floats/ints excluding lat/long and year)
+
+df_num = df[['engine_capacity_cc','number_of_casualties','number_of_vehicles','speed_limit']]
+
+
+df_num.hist( bins=25, grid=False, figsize=(12,8))
+plt.style.use('dark_background')
+
+# #number_of_casualties
+df['number_of_casualties'].value_counts()
+
+#create casualities grouping
+
+def casualities(num_cas):
+    if num_cas >=1 and num_cas <2:
+        return "1"
+    elif num_cas >=2 and num_cas <3:
+        return "2"
+    elif num_cas >=3 and num_cas <4:
+        return "3"
+    elif num_cas >= 4 and num_cas <5:
+        return "4"
+    elif num_cas >= 5:
+        return "5+"
+
+
+#apply function   
+df['number_of_casualties']= df['number_of_casualties'].apply(casualities)
+
+#number_of_casualties
+df['number_of_casualties'].value_counts()
+
+df['propulsion_code'].value_counts()/df.shape[0]*100
+
+#Clean the values for Propulsion Code. 
+df['propulsion_code'] = df['propulsion_code'].replace(to_replace="Gas", value="Petrol")
+df['propulsion_code'] = df['propulsion_code'].replace(to_replace="Gas/Bi-fuel", value="Bio-fuel")
+df['propulsion_code'] = df['propulsion_code'].replace(to_replace="Petrol/Gas (LPG)", value="LPG Petrol")
+df['propulsion_code'] = df['propulsion_code'].replace(to_replace="Gas Diesel", value="Diesel")
+
+df['propulsion_code'].value_counts()/df.shape[0]*100
+
+# #unique values
+df.nunique().sort_values(ascending=False)
+
+df['date'] = pd.to_datetime(df['date'])
+
+df['month'] = df ['date'].apply(lambda time: time.month)
+
+#creating a weekend feature that includes Friday-Sunday
+df['weekend']= np.where(df['day_of_week'].isin(['Friday', 'Saturday', 'Sunday']), 1, 0)
+
+
+#create time of day feature with Morning Rush, Day, Noon Rush, Afternoon, After Work Rush, Night
+
+#time of day dictionary
+timeofdaygroups = {1: "Morning Rush (6-10)",
+                   2: "Day (10-12)",
+                   3: "Lunch Rush (12-14)",
+                   4: "Afternoon (14-16)",
+                   5: "After Work Rush (16-18)",
+                   6: "Evening (18-22)",
+                   7: "Night (22-6)"}
+
+#pull time data and create hour column
+df['hour'] = df['time'].str[0:2]
+ 
+#convert to numeric    
+df['hour'] =  pd.to_numeric(df['hour'])
+
+#convert to integer
+df['hour'] = df['hour'].astype('int')
+
+#create time_of_day grouping
+
+def daygroup(hour):
+    if hour >= 6 and hour < 10:
+        return "1"
+    elif hour >= 10 and hour < 12:
+        return "2"
+    elif hour >= 12 and hour < 14:
+        return "3"
+    elif hour >= 14 and hour < 16:
+        return "4"
+    elif hour >= 16 and hour < 18:
+        return "5"
+    elif hour >= 18 and hour < 22:
+        return "6"
+    else:
+        return "7"
+
+
+#apply function   
+#time of day function
+df['time_of_day']= df['hour'].apply(daygroup)
+
+df[['weekend','day_of_week','time', 'time_of_day']].tail(10)
+
+
+
+#vehicle_type
+df['vehicle_type'].value_counts()/df.shape[0]*100
+
+#motorcycles
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Motorcycle over 500cc", 
+                                                        value="Motorcycle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace=
+                                                        "Motorcycle over 125cc and up to 500cc",
+                                                        value="Motorcycle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Motorcycle 125cc and under", 
+                                                value="Motorcycle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Motorcycle 50cc and under", 
+                                                        value="Motorcycle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Electric motorcycle", 
+                                                        value="Motorcycle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Motorcycle - unknown cc", 
+                                                        value="Motorcycle")
+
+
+#Goods_vehicle
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace=
+                                                        "Van / Goods 3.5 tonnes mgw or under", 
+                                                        value="Goods Vehicle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Goods over 3.5t. and under 7.5t", 
+                                                        value="Goods Vehicle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Goods vehicle - unknown weight", 
+                                                        value="Goods Vehicle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Goods 7.5 tonnes mgw and over", 
+                                                        value="Goods Vehicle")
+
+#car
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Taxi/Private hire car", 
+                                                        value="Car")
+
+
+#bus
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Minibus (8 - 16 passenger seats)", 
+                                                        value="Bus")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace=
+                                                        "Bus or coach (17 or more pass seats)", 
+                                                        value="Bus")
+
+#other vehicle
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Agricultural vehicle", 
+                                                        value="Other Vehicle")
+df['vehicle_type'] = df['vehicle_type'].replace(to_replace="Other vehicle", 
+                                                        value="Other Vehicle")
+
+#vehicle_type
+df['vehicle_type'].value_counts()/df.shape[0]*100
+
+#age_band_of_driver 
+df['age_band_of_driver'].value_counts()/df.shape[0]*100
+
+
+#I did this before hand because as "Over 75", it wouldnt convert in the codes below
+df['age_band_of_driver']=df['age_band_of_driver'].replace("Over 75","75-100")
+
+age1 = ["0 - 5", "6 - 10", "11 - 15"]
+age2 = ["16 - 20","21 - 25"]
+age3 = ["26 - 35","36 - 45"]
+age4 = ["46 - 55", "56 - 65"]
+age5 = ["66 - 75", "75-100"]
+
+
+#over 75 wouldnt work in the string so I did it separately
+for (row, col) in df.iterrows():
+
+    if str.lower(col.age_band_of_driver) in age1:
+        df['age_band_of_driver'].replace(to_replace=col.age_band_of_driver, 
+                                         value='Under 16', inplace=True)
+
+    if str.lower(col.age_band_of_driver) in age2:
+        df['age_band_of_driver'].replace(to_replace=col.age_band_of_driver, 
+                                         value='16-25', inplace=True)
+    
+    if str.lower(col.age_band_of_driver) in age3:
+        df['age_band_of_driver'].replace(to_replace=col.age_band_of_driver, 
+                                         value='26-45', inplace=True)
+    if str.lower(col.age_band_of_driver) in age4:
+        df['age_band_of_driver'].replace(to_replace=col.age_band_of_driver, 
+                                         value='46-65', inplace=True)
+    if str.lower(col.age_band_of_driver) in age5:
+        df['age_band_of_driver'].replace(to_replace=col.age_band_of_driver, 
+                                         value='Over 65', inplace=True)
+
+# number_of_vehicles
+df['number_of_vehicles'].value_counts()/df.shape[0]*100
+
+
+#group number_of_vehicles
+
+def vehicles(num_veh):
+    if num_veh >=1 and num_veh <2:
+        return "1"
+    elif num_veh >=2 and num_veh <3:
+        return "2"
+    elif num_veh >=3 and num_veh <4:
+        return "3"
+    elif num_veh >= 4: 
+        return "4+"
+  
+#apply function   
+df['number_of_vehicles']= df['number_of_vehicles'].apply(vehicles)
+
+# number_of_vehicles
+df['number_of_vehicles'].value_counts()/df.shape[0]*100
+
+df['number_of_vehicles'].dtypes
+
+df['number_of_vehicles']=df['number_of_vehicles'].astype('object')
+ 
+
+#creating seasons column for ML
+
+#creating season column
+
+def getSeason(month):
+    if (month == 12 or month == 1 or month == 2):
+       return "winter"
+    elif(month == 3 or month == 4 or month == 5):
+       return "spring"
+    elif(month == 6 or month== 7 or month == 8):
+       return "summer"
+    else:
+       return "fall"
+
+df['season'] = df['month'].apply(getSeason)
+
+# number_of_vehicles
+df['season'].value_counts()/df.shape[0]*100
+
+#go back to engine capacity CC and crete groups
+df.engine_capacity_cc.hist()
+
+
+def enginecap(eng_cc):
+    if eng_cc <=1500:
+        return "small engine cc"
+    if eng_cc >1500 and eng_cc <=2000:
+        return "medium engine cc"
+    if eng_cc >2000:
+        return "large engine cc"
+
+
+df['engine_capacity_cc_size'] = df['engine_capacity_cc'].apply(enginecap)
+
+
+df.engine_capacity_cc_size.value_counts()
+
+
+#Put above pickle in next full run
+#create new column for Machine Learning and Visualizations with Not Serious and Serious
+df['accident_seriousness'] = df['accident_severity']
+df['accident_seriousness'] = df['accident_seriousness'].replace(to_replace="Slight", 
+                                                                value="Not Serious")
+df['accident_seriousness'] = df['accident_seriousness'].replace(to_replace="Serious",
+                                                                value="Serious")
+df['accident_seriousness'] = df['accident_seriousness'].replace(to_replace="Fatal", 
+                                                                value="Serious")
+df.shape
+
+
+df.accident_seriousness.value_counts()
+
+
+#pickling everything to speed up restarting
+df.to_pickle("df.pkl")
+
+
+#import pickled file
+df = pd.read_pickle("df.pkl")
+df.head()

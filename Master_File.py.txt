@@ -1,0 +1,7 @@
+import os 
+
+os.system(r'C:\Users\sneha_kukreja\Music\Data_Creation.py')
+
+os.system(r'C:\Users\sneha_kukreja\Music\Accident_Analysis.py')
+
+print("The Project has been executed succesfully!")
